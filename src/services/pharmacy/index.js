@@ -38,10 +38,28 @@ app.post('/api/pharmacy/retiros', requireAuth(['paciente']), async (req, res, ne
 
   try {
     // 1) Validamos contra records-service (interfaz consumida).
+    // Este callInternal es GET => el Circuit Breaker de httpClient aplica retry
+    // con backoff. Si records se cuelga, tras CB_FAILURE_THRESHOLD fallos el
+    // circuito se abre y las siguientes respuestas son INMEDIATAS (fail fast).
     const r = await callInternal(
       `${config.urls.records}/api/records/internal/recetas/${recetaId}`,
       { correlationId: req.correlationId });
-    if (!r.ok) return res.status(r.status).json({ error: 'No se pudo validar la receta', detalle: r.datos });
+    if (!r.ok) {
+      // PATRON CIRCUIT BREAKER: si el rechazo viene de un circuito abierto, le
+      // contamos al cliente cuanto esperar (Retry-After en segundos) para que
+      // no siga martillando una dependencia que ya sabemos caida.
+      if (r.datos && r.datos.circuit === 'OPEN') {
+        const segundos = Math.max(1, Math.ceil((r.datos.retryAfterMs || 1000) / 1000));
+        res.setHeader('Retry-After', String(segundos));
+        return res.status(503).json({
+          error: 'Farmacia temporalmente saturada: la validacion de recetas no responde',
+          detalle: 'circuito abierto hacia records-service',
+          circuit: 'OPEN',
+          retryAfterSeg: segundos
+        });
+      }
+      return res.status(r.status).json({ error: 'No se pudo validar la receta', detalle: r.datos });
+    }
 
     const receta = r.datos.receta;
     // Autorizacion: nadie retira la receta de otro.

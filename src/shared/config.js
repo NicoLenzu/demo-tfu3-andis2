@@ -45,11 +45,30 @@ const config = {
     scheduling: process.env.SCHEDULING_URL || 'http://scheduling:3000',
     records:    process.env.RECORDS_URL    || 'http://records:3000',
     pharmacy:   process.env.PHARMACY_URL   || 'http://pharmacy:3000',
-    queue:      process.env.QUEUE_URL      || 'http://queue:3000'
+    queue:      process.env.QUEUE_URL      || 'http://queue:3000',
+    notifications: process.env.NOTIFICATIONS_URL || 'http://notifications:3000'
   },
 
   // A cuantas posiciones del frente se le avisa al paciente que se acerque.
-  avisoPosicion: parseInt(process.env.AVISO_POSICION || '2', 10)
+  avisoPosicion: parseInt(process.env.AVISO_POSICION || '2', 10),
+
+  // ---------------------------------------------------------------------------
+  // PATRON: CIRCUIT BREAKER (+ Retry)  -> atributo de calidad: DISPONIBILIDAD
+  //
+  // Evita el efecto cascada: si una dependencia (por ejemplo records-service)
+  // se cuelga, cada llamada esperaria el timeout completo y agotaria las
+  // conexiones del llamador. El breaker corta de inmediato tras N fallos
+  // consecutivos. El estado vive en memoria del proceso (una replica no le
+  // cuenta a otra): es aceptable porque es una optimizacion, no un dato.
+  // ---------------------------------------------------------------------------
+  circuitBreaker: {
+    failureThreshold: parseInt(process.env.CB_FAILURE_THRESHOLD || '5', 10),
+    openMs: parseInt(process.env.CB_OPEN_MS || '10000', 10),
+    // Los reintentos SOLO aplican a metodos idempotentes (GET). Reintentar un
+    // POST podria duplicar una operacion (doble retiro, doble cita).
+    retries: parseInt(process.env.CB_RETRIES || '2', 10),
+    retryBaseMs: parseInt(process.env.CB_RETRY_BASE_MS || '100', 10)
+  }
 };
 
 module.exports = config;

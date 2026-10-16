@@ -25,6 +25,12 @@ x-servicio-node: &servicio-node
     JWT_SECRET: secreto-tfu-ut3-2026
     INTERNAL_TOKEN: token-interno-tfu
     AVISO_POSICION: 2
+    NOTIFICATIONS_URL: http://notifications:3000
+    # --- PATRON 1: CIRCUIT BREAKER (+ retry) ---
+    CB_FAILURE_THRESHOLD: "${CB_FAILURE_THRESHOLD:-5}"
+    CB_OPEN_MS: "${CB_OPEN_MS:-10000}"
+    CB_RETRIES: "${CB_RETRIES:-2}"
+    CB_RETRY_BASE_MS: "${CB_RETRY_BASE_MS:-100}"
   depends_on:
     postgres:
       condition: service_healthy
@@ -104,6 +110,8 @@ services:
     environment:
       <<: *entorno-comun
       SERVICE_NAME: pharmacy-service
+      # Ventana del circuito mas corta en pharmacy para que el script 7 sea agil.
+      CB_OPEN_MS: "${CB_OPEN_MS:-5000}"
 
   queue:
     <<: *servicio-node

@@ -4,13 +4,14 @@
  * 
  * Todos los componentes comparten el mismo esqueleto:
  *  - /healthz: lo usa Docker (healthcheck) y nginx para no mandar trafico a una
- *    replica caida.
+ *    replica caida. Expone tambien el estado de los CIRCUIT BREAKERS del proceso.
  *  - Header X-Served-By con el id del contenedor: es la evidencia visible del
  *    balanceo entre replicas (mismo request, distinta instancia responde).
  *  - Correlation-Id: permite seguir una operacion que atraviesa 3 componentes.
  */
 const express = require('express');
 const config = require('./config');
+const { circuitSnapshot } = require('./httpClient');
 
 function createApp(nombre) {
   const app = express();
@@ -30,8 +31,9 @@ function createApp(nombre) {
   });
 
   // Health check barato: no toca la base, para no volverse un cuello de botella.
+  // Ademas expone el estado de los circuit breakers hacia cada dependencia.
   app.get('/healthz', (req, res) =>
-    res.json({ ok: true, componente: nombre, instancia: config.instanceId }));
+    res.json({ ok: true, componente: nombre, instancia: config.instanceId, circuits: circuitSnapshot() }));
 
   return app;
 }
