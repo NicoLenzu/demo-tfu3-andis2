@@ -163,13 +163,17 @@ services:
       SERVICE_NAME: gatekeeper
       GATEKEEPER_TOKEN: "${GATEKEEPER_TOKEN:-gatekeeper-dev-token}"
 
+  # PATRON 6 - GATEWAY OFFLOADING: TLS, cabeceras de seguridad, gzip y limite
+  # de cuerpo en el borde. En la red edge, solo conectado al gatekeeper.
   gateway:
     image: nginx:1.27-alpine
     networks: [edge]
     ports:
       - "8080:80"          # HTTP: compatibilidad con los scripts 0-6
+      - "8443:443"         # HTTPS: TLS terminado aca, adentro va HTTP plano
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       gatekeeper:
         condition: service_healthy
