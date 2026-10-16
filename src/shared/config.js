@@ -68,6 +68,21 @@ const config = {
     // POST podria duplicar una operacion (doble retiro, doble cita).
     retries: parseInt(process.env.CB_RETRIES || '2', 10),
     retryBaseMs: parseInt(process.env.CB_RETRY_BASE_MS || '100', 10)
+  },
+
+  // ---------------------------------------------------------------------------
+  // PATRON: CACHE-ASIDE  -> atributo de calidad: PERFORMANCE
+  //
+  // Redis guarda copias de lecturas caras (catalogos, cupos). El cache NUNCA
+  // puede tumbar el endpoint: ante cualquier error de Redis se degrada a
+  // PostgreSQL (X-Cache: BYPASS). timeoutMs corta el get/set si Redis esta
+  // colgado en vez de esperar el timeout TCP completo.
+  // ---------------------------------------------------------------------------
+  cache: {
+    enabled: process.env.CACHE_ENABLED !== 'false',
+    ttlCatalogo: parseInt(process.env.CACHE_TTL_CATALOGO || '300', 10),
+    ttlSlots: parseInt(process.env.CACHE_TTL_SLOTS || '30', 10),
+    timeoutMs: parseInt(process.env.CACHE_TIMEOUT_MS || '200', 10)
   }
 };
 

@@ -31,6 +31,11 @@ x-servicio-node: &servicio-node
     CB_OPEN_MS: "${CB_OPEN_MS:-10000}"
     CB_RETRIES: "${CB_RETRIES:-2}"
     CB_RETRY_BASE_MS: "${CB_RETRY_BASE_MS:-100}"
+    # --- PATRON 3: CACHE-ASIDE ---
+    CACHE_ENABLED: "${CACHE_ENABLED:-true}"
+    CACHE_TTL_CATALOGO: "${CACHE_TTL_CATALOGO:-300}"
+    CACHE_TTL_SLOTS: "${CACHE_TTL_SLOTS:-30}"
+    CACHE_TIMEOUT_MS: "${CACHE_TIMEOUT_MS:-200}"
   depends_on:
     postgres:
       condition: service_healthy

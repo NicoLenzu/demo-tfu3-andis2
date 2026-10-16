@@ -39,7 +39,14 @@ const KEYS = {
   streamRetiros: 'eventos:retiros',              // stream que emite pharmacy
   grupoCola: 'grupo-cola',                       // consumer group: cada evento lo
                                                  // procesa UNA sola replica
-  canalNotificaciones: 'canal:notificaciones'    // pub/sub hacia notifications
+  canalNotificaciones: 'canal:notificaciones',   // pub/sub hacia notifications
+
+  // --- CACHE-ASIDE (patron de performance) ---
+  // Copias de lecturas caras en Redis. El prefijo "cache:sch:" permite borrar
+  // todo el cache de scheduling de golpe (redis-cli --scan --pattern).
+  cacheEspecialidades: 'cache:sch:especialidades',
+  cacheMedicos: (especialidad) => `cache:sch:medicos:${especialidad || 'all'}`,
+  cacheSlots: (medico, fecha) => `cache:sch:slots:${medico}:${fecha || 'all'}`
 };
 
 module.exports = { makeRedis, getRedis, KEYS };

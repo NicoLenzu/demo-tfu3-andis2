@@ -13,31 +13,115 @@
 const { createApp, listen, errorHandler } = require('../../shared/server');
 const { query, withTransaction, waitForDb } = require('../../shared/db');
 const { requireAuth, requireInternal } = require('../../shared/auth');
+const { getRedis, KEYS } = require('../../shared/redisClient');
+const config = require('../../shared/config');
 
 const NOMBRE = 'scheduling-service';
 const app = createApp(NOMBRE);
+
+// ---------------------------------------------------------------------------
+// PATRON CACHE-ASIDE  -> atributo de calidad: PERFORMANCE
+//
+// Los catalogos (especialidades, medicos) y los cupos libres se leen MUCHO mas
+// de lo que cambian. Cache-aside: la app consulta Redis primero; si hay HIT
+// devuelve la copia, si hay MISS consulta PostgreSQL y guarda el resultado con
+// TTL. La INVALIDACION es explicita (no esperamos el TTL) cuando se reserva una
+// cita que cambia los cupos libres.
+//
+// Reglas de oro que se ven en el codigo:
+//  - requireAuth corre ANTES del cache: nunca cacheamos algo que un rol no
+//    puede ver (y ademas no mezclamos respuestas entre usuarios).
+//  - El cache nunca puede tumbar el endpoint: cualquier error de Redis se
+//    captura y se sigue contra PostgreSQL (X-Cache: BYPASS).
+//  - Los errores de PostgreSQL NO se cachean (calcular() lanza y no se hace SET).
+// ---------------------------------------------------------------------------
+
+/** Corta una operacion contra Redis si se cuelga (no esperamos el timeout TCP). */
+function conTimeout(promesa) {
+  return Promise.race([
+    promesa,
+    new Promise((_, rechazar) =>
+      setTimeout(() => rechazar(new Error('timeout de Redis')), config.cache.timeoutMs))
+  ]);
+}
+
+/**
+ * Aplica cache-aside. `calcular` produce el cuerpo a devolver/cachear.
+ * Setea el header X-Cache y devuelve el cuerpo.
+ */
+async function cacheAside(res, clave, ttlSegundos, calcular) {
+  if (!config.cache.enabled) {
+    res.setHeader('X-Cache', 'BYPASS');
+    return calcular();
+  }
+
+  let golpe = null;
+  try {
+    const redis = await getRedis();
+    golpe = await conTimeout(redis.get(clave));
+  } catch (err) {
+    console.error(`[${NOMBRE}] cache GET fallo (${clave}): ${err.message}`);
+    res.setHeader('X-Cache', 'BYPASS');
+    return calcular();                        // degradacion a PostgreSQL
+  }
+
+  if (golpe) {
+    res.setHeader('X-Cache', 'HIT');
+    return JSON.parse(golpe);
+  }
+
+  const valor = await calcular();             // MISS: consultamos PostgreSQL
+  try {
+    const redis = await getRedis();
+    await conTimeout(redis.set(clave, JSON.stringify(valor), { EX: ttlSegundos }));
+    res.setHeader('X-Cache', 'MISS');
+  } catch (err) {
+    console.error(`[${NOMBRE}] cache SET fallo (${clave}): ${err.message}`);
+    res.setHeader('X-Cache', 'BYPASS');
+  }
+  return valor;
+}
+
+/** Invalida copias de cupos. Nunca rompe la request que ya commiteo. */
+async function invalidarSlots(medicoId, fecha) {
+  if (!config.cache.enabled) return;
+  const claves = [KEYS.cacheSlots(medicoId, fecha), KEYS.cacheSlots(medicoId, 'all')];
+  try {
+    const redis = await getRedis();
+    await conTimeout(redis.del(claves));
+  } catch (err) {
+    console.error(`[${NOMBRE}] cache DEL fallo: ${err.message}`);
+  }
+}
 
 // --- HU1: reservar citas segun especialidad, doctor, dia y hora -------------
 
 app.get('/api/scheduling/especialidades', requireAuth(), async (req, res, next) => {
   try {
-    const { rows } = await query('SELECT * FROM scheduling.especialidades ORDER BY nombre');
-    res.json({ especialidades: rows });
+    const cuerpo = await cacheAside(res, KEYS.cacheEspecialidades, config.cache.ttlCatalogo, async () => {
+      const { rows } = await query('SELECT * FROM scheduling.especialidades ORDER BY nombre');
+      return { especialidades: rows };
+    });
+    res.json(cuerpo);
   } catch (err) { next(err); }
 });
 
 app.get('/api/scheduling/medicos', requireAuth(), async (req, res, next) => {
   try {
     const { especialidad } = req.query;
-    const { rows } = await query(
-      `SELECT m.id, m.nombre, e.nombre AS especialidad
-       FROM scheduling.medicos m
-       JOIN scheduling.especialidades e ON e.id = m.especialidad_id
-       WHERE ($1::int IS NULL OR e.id = $1::int)
-       ORDER BY m.nombre`,
-      [especialidad || null]
-    );
-    res.json({ medicos: rows });
+    const clave = KEYS.cacheMedicos(especialidad);
+    const cuerpo = await cacheAside(res, clave, config.cache.ttlCatalogo, async () => {
+      const { rows } = await query(
+        `SELECT m.id, m.nombre, e.nombre AS especialidad
+         FROM scheduling.medicos m
+         JOIN scheduling.especialidades e ON e.id = m.especialidad_id
+         WHERE ($1::int IS NULL OR e.id = $1::int)
+         ORDER BY m.nombre`,
+        [especialidad || null]
+      );
+      return { medicos: rows };
+    });
+    res.json(cuerpo);
   } catch (err) { next(err); }
 });
 
@@ -47,17 +131,22 @@ app.get('/api/scheduling/slots', requireAuth(), async (req, res, next) => {
     const { medico, fecha } = req.query;
     if (!medico) return res.status(400).json({ error: 'Falta el parametro medico' });
 
-    const { rows } = await query(
-      `SELECT id, inicio, estado
-       FROM scheduling.agenda_slots
-       WHERE medico_id = $1
-         AND estado = 'LIBRE'
-         AND ($2::date IS NULL OR inicio::date = $2::date)
-       ORDER BY inicio
-       LIMIT 50`,
-      [medico, fecha || null]
-    );
-    res.json({ cantidad: rows.length, slots: rows });
+    const clave = KEYS.cacheSlots(medico, fecha);
+    // TTL corto: los cupos cambian seguido; ademas los invalidamos al reservar.
+    const cuerpo = await cacheAside(res, clave, config.cache.ttlSlots, async () => {
+      const { rows } = await query(
+        `SELECT id, inicio, estado
+         FROM scheduling.agenda_slots
+         WHERE medico_id = $1
+           AND estado = 'LIBRE'
+           AND ($2::date IS NULL OR inicio::date = $2::date)
+         ORDER BY inicio
+         LIMIT 50`,
+        [medico, fecha || null]
+      );
+      return { cantidad: rows.length, slots: rows };
+    });
+    res.json(cuerpo);
   } catch (err) { next(err); }
 });
 
@@ -123,6 +212,15 @@ app.post('/api/scheduling/citas', requireAuth(['paciente']), async (req, res, ne
 
       return { ...ins.rows[0], inicio: slot.inicio };
     });
+
+    // PATRON CACHE-ASIDE: recien DESPUES del commit invalidamos las copias de
+    // cupos. Si la transaccion hizo ROLLBACK llegamos aca por el catch y NO se
+    // invalida (no hubo cambio que propagar). Se borran la clave del dia del
+    // slot y la clave "all" (la consulta sin filtro de fecha).
+    const fechaSlot = cita.inicio instanceof Date
+      ? cita.inicio.toISOString().slice(0, 10)
+      : String(cita.inicio).slice(0, 10);
+    await invalidarSlots(cita.medico_id, fechaSlot);
 
     res.status(201).json({ mensaje: 'Cita reservada', cita });
   } catch (err) {
