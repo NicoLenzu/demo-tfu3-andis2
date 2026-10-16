@@ -43,6 +43,17 @@ function signToken(usuario) {
 /** Middleware: exige JWT valido y, opcionalmente, un rol de la lista. */
 function requireAuth(rolesPermitidos = []) {
   return (req, res, next) => {
+    // -----------------------------------------------------------------------
+    // PATRON GATEKEEPER (defensa en profundidad): aunque el JWT sea valido,
+    // exigimos ver la marca del gatekeeper. Asi, alguien que llegue DIRECTO a
+    // la red interna (saltando el gateway) no puede operar. El JWT se sigue
+    // verificando abajo: no confiamos solo en los headers del gatekeeper.
+    // No afecta a requireInternal (interfaces internas) ni a /healthz.
+    // -----------------------------------------------------------------------
+    if (config.gatekeeperOnly && req.headers['x-gatekeeper-token'] !== config.gatekeeperToken) {
+      return res.status(403).json({ error: 'Acceso directo no permitido' });
+    }
+
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return res.status(401).json({ error: 'Falta header Authorization: Bearer <token>' });

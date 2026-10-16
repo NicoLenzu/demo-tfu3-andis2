@@ -13,9 +13,11 @@ const express = require('express');
 const config = require('./config');
 const { circuitSnapshot } = require('./httpClient');
 
-function createApp(nombre) {
+function createApp(nombre, { jsonLimit } = {}) {
   const app = express();
-  app.use(express.json());
+  // El limite del body es configurable: el gatekeeper lo usa para rechazar
+  // cuerpos grandes (413) antes de tocar los servicios de negocio.
+  app.use(express.json({ limit: jsonLimit || '100kb' }));
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
@@ -56,6 +58,13 @@ function listen(app, nombre) {
 
 function errorHandler(nombre) {
   return (err, req, res, _next) => {
+    // Errores que levanta express.json (validacion del body en el gatekeeper).
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Cuerpo de la solicitud demasiado grande', detalle: err.message });
+    }
+    if (err.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'JSON invalido en el cuerpo', detalle: err.message });
+    }
     console.error(`[${nombre}] ERROR:`, err.message);
     res.status(err.status || 500).json({ error: err.publicMessage || 'Error interno', detalle: err.message });
   };

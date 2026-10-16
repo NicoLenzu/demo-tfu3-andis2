@@ -86,6 +86,17 @@ const config = {
   },
 
   // ---------------------------------------------------------------------------
+  // PATRON: GATEKEEPER  -> atributo de calidad: SEGURIDAD (defensa en profundidad)
+  //
+  // El gatekeeper es la unica puerta de entrada al sistema. Los componentes
+  // confian en el JWT pero ADEMAS exigen ver la marca del gatekeeper para
+  // rechazar el acceso directo (bypass) a la red interna.
+  // ---------------------------------------------------------------------------
+  gatekeeperToken: process.env.GATEKEEPER_TOKEN || 'gatekeeper-dev-token',
+  gatekeeperOnly: process.env.GATEKEEPER_ONLY !== 'false',
+  gatekeeperMaxBody: process.env.GATEKEEPER_MAX_BODY || '100kb',
+
+  // ---------------------------------------------------------------------------
   // PATRON: QUEUE-BASED LOAD LEVELING  -> atributo de calidad: PERFORMANCE
   //
   // El stream de eventos se recorta para acotar la memoria de Redis. El
