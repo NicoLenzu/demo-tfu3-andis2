@@ -85,6 +85,10 @@ app.post('/api/pharmacy/retiros', requireAuth(['paciente']), async (req, res, ne
     // 3) Publicacion del evento (fuera de la transaccion, "fire and forget").
     // Si Redis estuviera caido, el retiro YA quedo grabado en PostgreSQL: la
     // cola se puede reconstruir despues. Degradacion controlada.
+    //
+    // PATRON QUEUE-BASED LOAD LEVELING: el productor NO procesa: encola y
+    // responde. Ademas recortamos el stream con MAXLEN ~ STREAM_MAXLEN para
+    // acotar la memoria de Redis (el stream es bitacora de trabajo, no archivo).
     try {
       const redis = await getRedis();
       await redis.xAdd(KEYS.streamRetiros, '*', {
@@ -93,6 +97,8 @@ app.post('/api/pharmacy/retiros', requireAuth(['paciente']), async (req, res, ne
         ticketCode: retiro.ticket_code,
         medicamento: receta.medicamento,
         tipo: 'VIRTUAL'
+      }, {
+        TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: config.streamMaxlen }
       });
     } catch (err) {
       console.error(`[${NOMBRE}] no se pudo publicar el evento:`, err.message);

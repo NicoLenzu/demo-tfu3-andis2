@@ -36,6 +36,9 @@ x-servicio-node: &servicio-node
     CACHE_TTL_CATALOGO: "${CACHE_TTL_CATALOGO:-300}"
     CACHE_TTL_SLOTS: "${CACHE_TTL_SLOTS:-30}"
     CACHE_TIMEOUT_MS: "${CACHE_TIMEOUT_MS:-200}"
+    # --- PATRON 4: QUEUE-BASED LOAD LEVELING ---
+    STREAM_MAXLEN: "${STREAM_MAXLEN:-10000}"
+    CONSUMER_DELAY_MS: "${CONSUMER_DELAY_MS:-0}"
   depends_on:
     postgres:
       condition: service_healthy

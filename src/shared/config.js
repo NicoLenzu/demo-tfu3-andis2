@@ -83,7 +83,17 @@ const config = {
     ttlCatalogo: parseInt(process.env.CACHE_TTL_CATALOGO || '300', 10),
     ttlSlots: parseInt(process.env.CACHE_TTL_SLOTS || '30', 10),
     timeoutMs: parseInt(process.env.CACHE_TIMEOUT_MS || '200', 10)
-  }
+  },
+
+  // ---------------------------------------------------------------------------
+  // PATRON: QUEUE-BASED LOAD LEVELING  -> atributo de calidad: PERFORMANCE
+  //
+  // El stream de eventos se recorta para acotar la memoria de Redis. El
+  // consumidor puede simularse lento (CONSUMER_DELAY_MS) para hacer visible el
+  // desacople temporal entre productor y consumidor.
+  // ---------------------------------------------------------------------------
+  streamMaxlen: parseInt(process.env.STREAM_MAXLEN || '10000', 10),
+  consumerDelayMs: parseInt(process.env.CONSUMER_DELAY_MS || '0', 10)
 };
 
 module.exports = config;
