@@ -5,10 +5,16 @@ contenedores, ACID + BASE y servicios sin estado.
 
 ## Como levantar
 
+    ./scripts/gen-certs.sh          # genero el certificado TLS autofirmado (una vez)
     docker compose up -d --build
     docker compose ps
 
-Todo se accede por el gateway: http://localhost:8080
+Todo se accede por el gateway: http://localhost:8080 (HTTP) o
+https://localhost:8443 (HTTPS con TLS terminado en el borde, certificado
+autofirmado: usar `curl -k`).
+
+Toda la API pasa por el **gatekeeper**, que centraliza autenticacion,
+autorizacion por rol, saneamiento de headers y control de tamano.
 
 ## Usuarios de prueba
 
@@ -21,7 +27,7 @@ Todo se accede por el gateway: http://localhost:8080
 | farma@clinica.uy     | farma123   | farmaceutico  |
 | admin@clinica.uy     | admin123   | admin         |
 
-## Demos (en este orden)
+## Demos parte 1 (en este orden)
 
     chmod +x scripts/*.sh
     ./scripts/0-smoke.sh            # todo arriba
@@ -31,6 +37,25 @@ Todo se accede por el gateway: http://localhost:8080
     ./scripts/4-acid.sh             # transacciones ACID
     ./scripts/5-base.sh             # consistencia eventual (BASE)
     ./scripts/6-notificaciones.sh   # pub/sub entre componentes
+
+## Demos parte 2: patrones de arquitectura
+
+Seis patrones, un script por patron. Todo se puede correr de una:
+
+    ./scripts/all-tfu4.sh
+
+o de a uno:
+
+    ./scripts/7-circuit-breaker.sh      # disponibilidad
+    ./scripts/8-rate-limiting.sh        # disponibilidad (anti-DoS)
+    ./scripts/9-cache-aside.sh          # performance
+    ./scripts/10-load-leveling.sh       # performance / resiliencia
+    ./scripts/11-gatekeeper.sh          # seguridad
+    ./scripts/12-gateway-offloading.sh  # seguridad / performance
+
+Cada script imprime `OK`/`FALLO` por criterio y termina con codigo distinto de
+cero si algo fallo. El detalle de cada patron (archivos, variables de entorno,
+que muestra) esta en [docs/parte2-patrones.md](docs/parte2-patrones.md).
 
 ## Escalar a mano
 
@@ -74,6 +99,7 @@ Todo se accede por el gateway: http://localhost:8080
 
 ### queue-service
 - GET  /api/queue/farmacia
+- GET  /api/queue/farmacia/resumen        (estado del stream: pendientes y total)
 - GET  /api/queue/mi-turno                (paciente)
 - POST /api/queue/farmacia/presencial     (farmaceutico)
 - POST /api/queue/farmacia/siguiente      (farmaceutico)
